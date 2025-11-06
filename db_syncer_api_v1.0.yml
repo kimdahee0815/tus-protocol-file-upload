@@ -133,205 +133,119 @@ paths:
                   payload:
                     type: object
 
-  ##########################################################################
-  # 파일 업로드 (tus 기반)
-  ##########################################################################
+##########################################################################
+# 파일 업로드 (tus 기반)
+##########################################################################
+
   /api/tus/file/upload:
     post:
       tags:
         - file
       summary: TUS 파일 업로드 세션 생성
       description: |
-        TUS 프로토콜 기반 파일 업로드 세션을 생성
+        TUS 프로토콜 기반 파일 업로드 세션을 생성 
         업로드할 파일의 메타데이터와 크기를 전송하면 업로드 세션 URL을 반환
       parameters:
+        - in: header
+          name: Tus-Resumable
+          required: true
+          schema:
+            type: string
+            example: "1.0.0"
+          description: TUS 프로토콜 버전
         - in: header
           name: Upload-Length
           required: true
           schema:
             type: integer
+            example: 52428800
           description: 업로드할 전체 파일 크기 (바이트)
-          example: 52428800
         - in: header
           name: Upload-Metadata
           required: false
           schema:
             type: string
-          description: 파일 메타데이터 (Base64 인코딩된 key-value 쌍)
-          example: "filename dGVzdC5tcDQ=,filetype dmlkZW8vbXA0"
+          description: |
+            Base64 인코딩된 key-value 쌍 (예: `"filename dGVzdC5tcDQ="`)
         - in: header
           name: X-Tenant-Id
-          required: false
           schema:
             type: string
           description: 테넌트 ID
-          example: "1000"
-        - in: header
-          name: X-Rec-Date
-          required: false
-          schema:
-            type: string
-          description: 녹음 날짜 (yyyyMMdd)
-          example: "20250106"
-        - in: header
-          name: X-Rec-Htime
-          required: false
-          schema:
-            type: string
-          description: 녹음 시간 (HH)
-          example: "14"
-        - in: header
-          name: X-Rec-Time
-          required: false
-          schema:
-            type: string
-          description: 녹음 재생 시간 (hh:mm:ss)
-          example: "00:05:30"
-        - in: header
-          name: X-Ext-No
-          required: false
-          schema:
-            type: string
-          description: 내선 번호
-          example: "1234"
         - in: header
           name: X-File-Name
-          required: false
           schema:
             type: string
-          description: 원본 파일명
-          example: "recording.mp4"
-        - in: header
-          name: X-Client-File-Name
-          required: false
-          schema:
-            type: string
-          description: 클라이언트 파일명
+          description: 클라이언트 원본 파일명
           example: "recording.mp4"
         - in: header
           name: X-Server-File-Name
-          required: false
           schema:
             type: string
-          description: 서버 저장 파일명 (고유 파일명)
+          description: 서버 저장용 파일명 (resume 시 동일해야 함)
           example: "1736150400000_abc123def.mp4"
-        - in: header
-          name: Tus-Resumable
-          required: true
-          schema:
-            type: string
-            example: "1.0.0"
-          description: TUS 프로토콜 버전
       responses:
         "201":
           description: 업로드 세션 생성 성공
           headers:
             Location:
-              description: 업로드를 진행할 고유 URL (PATCH 요청에 사용)
               schema:
                 type: string
                 example: "/api/tus/file/upload/1736150400000_abc123def"
             Tus-Resumable:
-              description: TUS 프로토콜 버전
               schema:
                 type: string
                 example: "1.0.0"
             Access-Control-Expose-Headers:
-              description: CORS 노출 헤더
               schema:
                 type: string
                 example: "*"
         "400":
-          $ref: "#/components/responses/400"
+          description: 잘못된 요청 또는 파일 검증 실패
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseBody"
         "500":
-          $ref: "#/components/responses/500"
+          description: 서버 내부 오류
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponseBody"
 
-    options:
-      tags:
-        - file
-      summary: TUS 프로토콜 지원 정보 조회
-      description: |
-        서버가 지원하는 TUS 프로토콜 버전 및 확장 기능을 반환
-        CORS preflight 요청에도 사용됨
-      responses:
-        "200":
-          description: TUS 프로토콜 정보 반환
-          headers:
-            Tus-Resumable:
-              description: TUS 프로토콜 버전
-              schema:
-                type: string
-                example: "1.0.0"
-            Tus-Version:
-              description: 지원하는 TUS 버전 목록
-              schema:
-                type: string
-                example: "1.0.0"
-            Tus-Extension:
-              description: 지원하는 TUS 확장 기능
-              schema:
-                type: string
-                example: "creation,termination,checksum"
-            Access-Control-Allow-Methods:
-              description: 허용된 HTTP 메서드
-              schema:
-                type: string
-                example: "POST,PATCH,HEAD,OPTIONS"
-            Access-Control-Allow-Headers:
-              description: 허용된 요청 헤더
-              schema:
-                type: string
-                example: "Upload-Length,Upload-Offset,Tus-Resumable,Upload-Metadata,Content-Type,X-Tenant-Id,X-Rec-Date,X-Rec-Htime,X-Rec-Time,X-Ext-No,X-File-Name,X-Client-File-Name,X-Server-File-Name"
-            Access-Control-Expose-Headers:
-              description: 노출된 응답 헤더
-              schema:
-                type: string
-                example: "*"
-
-  /api/tus/file/upload/{uploadId}:
     patch:
       tags:
         - file
-      summary: TUS 파일 청크 업로드
+      summary: TUS 파일 업로드 (청크 업로드 및 이어올리기)
       description: |
-        생성된 업로드 세션에 파일 데이터를 청크 단위로 전송
-        Upload-Offset을 통해 이어서 업로드가 가능함
+        기존에 생성된 업로드 세션 URL(`/api/tus/file/upload/{uploadId}`)에  
+        파일 데이터를 청크 단위로 전송
+        클라이언트는 `Upload-Offset`을 통해 이어서 업로드할 수 있음
       parameters:
-        - in: path
-          name: uploadId
-          required: true
-          schema:
-            type: string
-          description: 업로드 세션 ID (POST 요청의 Location 헤더에서 반환된 값)
-          example: "1736150400000_abc123def"
-        - in: header
-          name: Upload-Offset
-          required: true
-          schema:
-            type: integer
-          description: 현재까지 업로드된 바이트 수
-          example: 0
-        - in: header
-          name: Content-Type
-          required: true
-          schema:
-            type: string
-            example: application/offset+octet-stream
-          description: TUS 프로토콜 전용 Content-Type
-        - in: header
-          name: Content-Length
-          required: true
-          schema:
-            type: integer
-          description: 현재 전송하는 청크의 크기 (바이트)
-          example: 52428800
         - in: header
           name: Tus-Resumable
           required: true
           schema:
             type: string
             example: "1.0.0"
-          description: TUS 프로토콜 버전
+        - in: header
+          name: Upload-Offset
+          required: true
+          schema:
+            type: integer
+            example: 0
+        - in: header
+          name: Content-Type
+          required: true
+          schema:
+            type: string
+            example: "application/offset+octet-stream"
+        - in: header
+          name: Content-Length
+          required: true
+          schema:
+            type: integer
+            example: 1048576
       requestBody:
         required: true
         content:
@@ -339,34 +253,24 @@ paths:
             schema:
               type: string
               format: binary
-              description: 파일 청크 데이터 (바이너리)
       responses:
         "200":
-          description: 청크 업로드 성공
+          description: 업로드 성공 (또는 이어올리기 성공)
           headers:
             Upload-Offset:
-              description: 현재까지 업로드된 총 바이트 수
               schema:
                 type: integer
-                example: 52428800
+                example: 1048576
             Tus-Resumable:
-              description: TUS 프로토콜 버전
               schema:
                 type: string
                 example: "1.0.0"
             Access-Control-Expose-Headers:
-              description: CORS 노출 헤더
               schema:
                 type: string
                 example: "*"
-        "409":
-          description: Upload-Offset 불일치 (충돌 에러)
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponseBody"
-        "413":
-          description: 전송 용량 초과
+        "400":
+          description: 파일 검증 실패
           content:
             application/json:
               schema:
@@ -377,46 +281,32 @@ paths:
     head:
       tags:
         - file
-      summary: TUS 업로드 상태 조회
-      description: |
-        현재 업로드 세션의 진행 상태를 확인
-        Upload-Offset을 통해 이미 업로드된 바이트 수를 알 수 있음
+      summary: 업로드 세션 상태 조회
+      description: 업로드 세션의 현재 업로드 진행 상태를 확인
       parameters:
-        - in: path
-          name: uploadId
-          required: true
-          schema:
-            type: string
-          description: 업로드 세션 ID
-          example: "1736150400000_abc123def"
         - in: header
           name: Tus-Resumable
           required: true
           schema:
             type: string
             example: "1.0.0"
-          description: TUS 프로토콜 버전
       responses:
         "200":
-          description: 업로드 상태 반환
+          description: 업로드 상태 조회 성공
           headers:
             Upload-Offset:
-              description: 현재까지 업로드된 바이트 수
               schema:
                 type: integer
-                example: 26214400
+                example: 5242880
             Upload-Length:
-              description: 전체 파일 크기 (바이트)
               schema:
                 type: integer
-                example: 52428800
+                example: 10485760
             Tus-Resumable:
-              description: TUS 프로토콜 버전
               schema:
                 type: string
                 example: "1.0.0"
             Access-Control-Expose-Headers:
-              description: CORS 노출 헤더
               schema:
                 type: string
                 example: "*"
@@ -430,43 +320,36 @@ paths:
     options:
       tags:
         - file
-      summary: TUS 업로드 세션 옵션 조회
-      description: |
-        특정 업로드 세션에 대한 TUS 프로토콜 지원 정보를 반환
-        CORS preflight 요청에도 사용됨
-      parameters:
-        - in: path
-          name: uploadId
-          required: true
-          schema:
-            type: string
-          description: 업로드 세션 ID
-          example: "1736150400000_abc123def"
+      summary: CORS Preflight 및 TUS 옵션 조회
+      description: 서버가 지원하는 TUS 프로토콜 정보 및 허용된 메서드/헤더 정보를 반환
       responses:
         "200":
-          description: TUS 프로토콜 정보 반환
+          description: 허용된 TUS 설정 반환
           headers:
             Tus-Resumable:
-              description: TUS 프로토콜 버전
               schema:
                 type: string
                 example: "1.0.0"
             Tus-Version:
-              description: 지원하는 TUS 버전 목록
               schema:
                 type: string
                 example: "1.0.0"
+            Tus-Extension:
+              schema:
+                type: string
+                example: "creation,termination,checksum"
             Access-Control-Allow-Methods:
-              description: 허용된 HTTP 메서드
               schema:
                 type: string
                 example: "POST,PATCH,HEAD,OPTIONS"
+            Access-Control-Allow-Headers:
+              schema:
+                type: string
+                example: "Upload-Length,Upload-Offset,Tus-Resumable,Upload-Metadata,Content-Type,X-Tenant-Id,X-File-Name,X-Server-File-Name"
             Access-Control-Expose-Headers:
-              description: CORS 노출 헤더
               schema:
                 type: string
                 example: "*"
-
 
 ######################################################################################
 ######################################################################################

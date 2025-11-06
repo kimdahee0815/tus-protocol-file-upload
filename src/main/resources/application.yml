@@ -51,7 +51,7 @@ management:
 
 file:
   path: C:\\uploads
-  max-size: 104857600  # 100MB
+  max-size: 1048576000  # 1GB
   sms-allowed-extensions:
     - jpg
     - png
@@ -76,10 +76,12 @@ file:
   voice-allowed-extensions:
     - wav
     - mp3
+    - mp4
     - m4a
     - aac
     - ogg
     - flac
+    - tmp
   voice-allowed-content-types:
     - audio/wav
     - audio/mpeg
@@ -88,3 +90,4 @@ file:
     - audio/aac
     - audio/ogg
     - audio/flac
+    - video/mp4
