@@ -8,16 +8,14 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestMethod;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.HashMap;
+import java.util.Map;
 
-/**
- * 참고: https://qiita.com/Amtkxa/items/6a605209bcc6eb477ec0
- * 참고: https://github.com/tus/tus-js-client/blob/master/docs/usage.md
- * 참고: https://stackoverflow.com/questions/72917279/how-to-upload-multiple-files-using-tus-protocol
- */
 @Slf4j
 @RestController
 @RequiredArgsConstructor
@@ -60,5 +58,20 @@ public class FileUploadController {
         return ResponseEntity.status(status)
                 .headers(headers)
                 .build();
+    }
+
+    /**
+     * 파일 검증 예외 처리
+     */
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseEntity<Map<String, Object>> handleValidationException(IllegalArgumentException e) {
+        log.error("File validation error: {}", e.getMessage());
+
+        Map<String, Object> errorResponse = new HashMap<>();
+        errorResponse.put("status", 0);
+        errorResponse.put("message", e.getMessage());
+        errorResponse.put("payload", null);
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(errorResponse);
     }
 }

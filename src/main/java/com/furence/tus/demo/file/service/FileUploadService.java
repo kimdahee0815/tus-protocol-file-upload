@@ -4,6 +4,8 @@ import com.furence.tus.demo.file.domain.dto.RecFileSaveRequest;
 import com.furence.tus.demo.file.domain.dto.UploadFileSaveRequest;
 import com.furence.tus.demo.file.repository.RecFileRepository;
 import com.furence.tus.demo.file.repository.UploadFileRepository;
+import com.furence.tus.demo.global.config.FileValidator;
+import com.furence.tus.demo.global.config.FileUploadProperties;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -18,7 +20,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.util.UUID;
 
 @Slf4j
 @Service
@@ -28,6 +29,8 @@ public class FileUploadService {
     private final TusFileUploadService tusFileUploadService;
     private final RecFileRepository recFileRepository;
     private final UploadFileRepository uploadFileRepository;
+    private final FileValidator fileValidator;
+    private final FileUploadProperties fileUploadProperties;
 
     @Transactional
     public void saveRecFile(RecFileSaveRequest dto) {
@@ -41,6 +44,11 @@ public class FileUploadService {
 
     public void processUpload(HttpServletRequest request, HttpServletResponse response) {
         try {
+            // POST 요청 시 (업로드 시작 단계)에서 파일 검증
+            if ("POST".equalsIgnoreCase(request.getMethod())) {
+                validateUploadRequest(request);
+            }
+
             tusFileUploadService.process(request, response);
 
             UploadInfo uploadInfo = tusFileUploadService.getUploadInfo(request.getRequestURI());
@@ -81,6 +89,66 @@ public class FileUploadService {
         }
     }
 
+    /**
+     * 업로드 요청 검증 (POST 시점에 호출)
+     */
+    private void validateUploadRequest(HttpServletRequest request) {
+        String clientFileName = request.getHeader("X-Client-File-Name");
+        String uploadLength = request.getHeader("Upload-Length");
+        String uploadMetadata = request.getHeader("Upload-Metadata");
+
+        // 파일명 검증
+        if (clientFileName == null || clientFileName.isBlank()) {
+            log.warn("X-Client-File-Name header is missing");
+        } else {
+            // 제한된 확장자 검증 (exe, bat 등)
+            fileValidator.validateRestrictedExtension(clientFileName);
+
+            // 음성 파일 확장자 검증 (wav, mp3, m4a 등)
+            fileValidator.validateVoiceFileExtension(clientFileName);
+        }
+
+        // 파일 크기 검증
+        if (uploadLength != null && !uploadLength.isBlank()) {
+            try {
+                long fileSize = Long.parseLong(uploadLength);
+                fileValidator.validateFileSize(fileSize);
+            } catch (NumberFormatException e) {
+                log.warn("Invalid Upload-Length header: {}", uploadLength);
+            }
+        }
+
+        // Content-Type 검증 (메타데이터에서 추출)
+        if (uploadMetadata != null && !uploadMetadata.isBlank()) {
+            String contentType = extractContentTypeFromMetadata(uploadMetadata);
+            if (contentType != null) {
+                fileValidator.validateRestrictedContentType(contentType);
+                fileValidator.validateVoiceContentType(contentType);
+            }
+        }
+
+        log.info("File validation passed for: {}", clientFileName);
+    }
+
+    /**
+     * Upload-Metadata에서 Content-Type 추출
+     * 형식: "filename dGVzdC5tcDQ=,filetype YXVkaW8vbXA0"
+     */
+    private String extractContentTypeFromMetadata(String metadata) {
+        try {
+            String[] pairs = metadata.split(",");
+            for (String pair : pairs) {
+                String[] keyValue = pair.trim().split(" ", 2);
+                if (keyValue.length == 2 && "filetype".equalsIgnoreCase(keyValue[0])) {
+                    byte[] decoded = java.util.Base64.getDecoder().decode(keyValue[1]);
+                    return new String(decoded);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to extract content type from metadata: {}", metadata);
+        }
+        return null;
+    }
 
     private void saveFileInfoToDatabase(HttpServletRequest request, File file, String serverFileName, String clientFileName) {
         try {
@@ -112,21 +180,6 @@ public class FileUploadService {
         }
     }
 
-    /**
-     * ✅ 서버 내부 고유 파일명 생성
-     * 예: 20251105T103012_UUID_원본이름
-     */
-    private String createUniqueFileName(String originalFileName) {
-        String ext = "";
-        int dotIdx = originalFileName.lastIndexOf(".");
-        if (dotIdx != -1) {
-            ext = originalFileName.substring(dotIdx);
-        }
-
-        String uniquePrefix = System.currentTimeMillis() + "_" + UUID.randomUUID().toString().substring(0, 8);
-        return uniquePrefix + ext;
-    }
-
     private Long parseLongHeader(HttpServletRequest request, String headerName) {
         String headerValue = request.getHeader(headerName);
         if (headerValue == null || headerValue.trim().isEmpty()) {
@@ -142,7 +195,8 @@ public class FileUploadService {
     }
 
     private File createFile(InputStream is, String filename) throws IOException {
-        File dir = new File("C:/uploads/");
+        // YAML 설정에서 경로 읽어오기
+        File dir = new File(fileUploadProperties.getPath());
         if (!dir.exists()) dir.mkdirs();
 
         File file = new File(dir, filename);

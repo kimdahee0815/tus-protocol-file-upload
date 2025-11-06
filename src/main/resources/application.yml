@@ -48,3 +48,43 @@ management:
   metrics:
     tags:
       application: ${spring.application.name}
+
+file:
+  path: C:\\uploads
+  max-size: 104857600  # 100MB
+  sms-allowed-extensions:
+    - jpg
+    - png
+    - gif
+  restricted-file-extensions:
+    - exe
+    - bat
+    - sh
+    - js
+    - php
+    - html
+    - msi
+  restricted-file-content-type:
+    - application/x-msdownload
+    - text/html
+    - application/javascript
+    - text/javascript
+    - application/x-bat
+    - application/x-msi
+    - application/x-php
+  # 음성 파일 설정 (녹취 파일용)
+  voice-allowed-extensions:
+    - wav
+    - mp3
+    - m4a
+    - aac
+    - ogg
+    - flac
+  voice-allowed-content-types:
+    - audio/wav
+    - audio/mpeg
+    - audio/mp4
+    - audio/x-m4a
+    - audio/aac
+    - audio/ogg
+    - audio/flac
