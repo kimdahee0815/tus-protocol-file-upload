@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>tus-io-sample</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet"
+          integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC" crossorigin="anonymous">
+    <style>
+        .upload-card {
+            padding: 20px;
+            margin: 20px;
+        }
+        .file-data {
+            border: 1px solid #ddd;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+            position: relative;
+        }
+        .file-data.completed {
+            background-color: #d4edda;
+        }
+        .form-section {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+<div class="upload-card">
+    <!-- 업로드 정보 입력 폼 -->
+    <div class="form-section">
+        <h5>업로드 정보 입력</h5>
+        <div class="row">
+            <div class="col-md-6">
+                <label for="r_tenant_id" class="form-label">Tenant ID:</label>
+                <input type="number" class="form-control" id="r_tenant_id" placeholder="예: 1000" required>
+            </div>
+            <div class="col-md-6">
+                <label for="r_ext_no" class="form-label">내선 번호:</label>
+                <input type="text" class="form-control" id="r_ext_no" placeholder="예: 1234" required>
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-12">
+            <div id="input-section">
+                <div class="heading">업로드할 파일을 선택해주세요:</div>
+                <input type="file" id="js-file-input" multiple>
+            </div>
+
+            <div id="progress-section">
+                <div class="heading" id="heading"></div>
+                <div class="d-flex">
+                    <div class="js-action-btn">
+                        <button class="btn btn-primary" id="toggle-btn">파일 업로드</button>
+                        <button class="btn btn-secondary ms-2" id="clear-btn">전체 삭제</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<div id="data-pre"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tus-js-client@3.0.0-0/dist/tus.min.js"></script>
+<script type="text/javascript">
+    const fileInput = document.querySelector('#js-file-input');
+    const dataDiv = document.querySelector('#data-pre');
+    const toggleBtn = document.querySelector('#toggle-btn');
+    const clearBtn = document.querySelector('#clear-btn');
+
+    // LocalStorage 키
+    const STORAGE_KEY = 'tus_file_uploads';
+    const FORM_DATA_KEY = 'tus_form_data';
+
+    function reset() {
+        convertedFiles.forEach((item) => {
+            if (!item.completed) {
+                const displayKey = item.id;
+                $('.progress-bar_' + displayKey).css('width', '0%');
+                $('#js-upload-text-progress_' + displayKey).html('');
+            }
+        });
+    }
+
+    function formatBytes(bytes, decimals = 2) {
+        if (bytes === 0) return '0 Bytes';
+
+        const k = 1024;
+        const dm = decimals < 0 ? 0 : decimals;
+        const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB', 'PB', 'EB', 'ZB', 'YB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(dm)) + ' ' + sizes[i];
+    }
+
+    /**
+     * 오늘 날짜를 yyyyMMdd 형식으로 반환
+     */
+    function getToday() {
+        const today = new Date();
+        const year = today.getFullYear();
+        const month = String(today.getMonth() + 1).padStart(2, '0');
+        const day = String(today.getDate()).padStart(2, '0');
+        return `${year}${month}${day}`;
+    }
+
+    /**
+     * 현재 시각을 HH 형식으로 반환
+     */
+    function getCurrentHour() {
+        const now = new Date();
+        return String(now.getHours()).padStart(2, '0');
+    }
+
+    /**
+     * 오디오/비디오 파일의 재생 시간을 hh:mm:ss 형식으로 가져오기
+     */
+    function getMediaDuration(file) {
+        return new Promise((resolve, reject) => {
+            const fileURL = URL.createObjectURL(file);
+            const mediaElement = document.createElement(file.type.startsWith('audio') ? 'audio' : 'video');
+
+            mediaElement.onloadedmetadata = function() {
+                const duration = mediaElement.duration;
+                const hours = Math.floor(duration / 3600);
+                const minutes = Math.floor((duration % 3600) / 60);
+                const seconds = Math.floor(duration % 60);
+
+                const formatted = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+                URL.revokeObjectURL(fileURL);
+                resolve(formatted);
+            };
+
+            mediaElement.onerror = function() {
+                URL.revokeObjectURL(fileURL);
+                resolve('00:00:00');
+            };
+
+            mediaElement.src = fileURL;
+        });
+    }
+
+    // 파일 정보를 localStorage에 저장
+    function saveToStorage() {
+        const fileData = convertedFiles.map((item, index) => ({
+            id: item.id,
+            index: index, // 현재 배열 순서를 index로 사용
+            name: item.name,
+            type: item.type,
+            size: item.size,
+            recTime: item.recTime,
+            completed: item.completed || false,
+            progress: item.progress || 0,
+            serverFileName: item.serverFileName || null
+        }));
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(fileData));
+    }
+
+    // localStorage에서 파일 정보 로드
+    function loadFromStorage() {
+        const saved = localStorage.getItem(STORAGE_KEY);
+        return saved ? JSON.parse(saved) : [];
+    }
+
+    // 폼 데이터 저장
+    function saveFormData() {
+        const formData = {
+            tenantId: document.getElementById('r_tenant_id').value,
+            extNo: document.getElementById('r_ext_no').value
+        };
+        localStorage.setItem(FORM_DATA_KEY, JSON.stringify(formData));
+    }
+
+    // 폼 데이터 로드
+    function loadFormData() {
+        const saved = localStorage.getItem(FORM_DATA_KEY);
+        if (saved) {
+            try {
+                const formData = JSON.parse(saved);
+                document.getElementById('r_tenant_id').value = formData.tenantId || '';
+                document.getElementById('r_ext_no').value = formData.extNo || '';
+            } catch (e) {
+                console.error('Failed to parse form data', e);
+            }
+        }
+    }
+
+    // 저장된 파일 정보 표시
+    function restoreSavedFiles() {
+        const savedFiles = loadFromStorage();
+        if (savedFiles.length === 0) return;
+
+        savedFiles.forEach((savedFile, index) => {
+            // convertedFiles 배열에 추가 (file 객체 없이 정보만)
+            convertedFiles.push({
+                id: savedFile.id,
+                name: savedFile.name,
+                type: savedFile.type,
+                size: savedFile.size,
+                recTime: savedFile.recTime,
+                completed: savedFile.completed,
+                progress: savedFile.progress,
+                serverFileName: savedFile.serverFileName,
+                file: null // 파일 객체 없음
+            });
+        });
+
+        // UI 전체 다시 렌더링
+        reRenderAllFiles();
+    }
+
+    // 모든 파일 UI 다시 렌더링
+    function reRenderAllFiles() {
+        dataDiv.innerHTML = '';
+        convertedFiles.forEach((item, index) => {
+            const displayKey = item.id;
+            const statusClass = item.completed ? ' completed' : '';
+
+            const fileDiv = document.createElement('div');
+            fileDiv.className = 'file-data' + statusClass;
+            fileDiv.setAttribute('data-id', item.id);
+            fileDiv.innerHTML = `
+                <button class="btn btn-sm btn-danger float-end" onclick="removeFileById('${item.id}')">삭제</button>
+                <div><strong>순서:</strong> ${index + 1}</div>
+                <div><strong>파일명:</strong> ${item.name}</div>
+                <div><strong>파일 ID:</strong> ${item.serverFileName || item.id}</div>
+                <div><strong>파일 타입:</strong> ${item.type}</div>
+                <div><strong>파일 크기:</strong> ${formatBytes(item.size)}</div>
+                <div><strong>녹음 시간:</strong> ${item.recTime}</div>
+                <div><strong>상태:</strong> ${item.completed ? '<span class="text-success">업로드 완료</span>' : (item.file ? '<span class="text-primary">업로드 대기</span>' : '<span class="text-info">파일 재선택 후 업로드 가능</span>')}</div>
+                <div class="flex-grow-1 mt-2">
+                    <div class="progress pr_${displayKey}">
+                        <div class="progress-bar_${displayKey} progress-bar-striped bg-success" role="progressbar" style="width: ${item.progress || 0}%"></div>
+                    </div>
+                    <div class="upload-text-progress" id="js-upload-text-progress_${displayKey}">
+                        ${item.completed ? '파일 저장 완료' : ''}
+                    </div>
+                </div>
+            `;
+            dataDiv.appendChild(fileDiv);
+        });
+    }
+
+    let convertedFiles = [];
+
+    fileInput.addEventListener('change', async (e) => {
+        const files = e.target.files;
+
+        for (let k = 0; k < files.length; k++) {
+            const file = files[k];
+
+            // 미디어 파일의 재생 시간 가져오기
+            let recTime = '00:00:00';
+            if (file.type.startsWith('audio') || file.type.startsWith('video')) {
+                recTime = await getMediaDuration(file);
+            }
+
+            // 이전에 저장된 진행률 불러오기
+            const savedFiles = loadFromStorage();
+            let progress = 0;
+            let completed = false;
+            let uniqueId = Date.now() + '_' + Math.random().toString(36).substring(2, 10);
+
+            function generateServerFileName(file) {
+                const ext = file.name.includes('.') ? file.name.substring(file.name.lastIndexOf('.')) : '';
+                const uniquePrefix = Date.now() + '_' + Math.random().toString(36).substring(2, 10);
+                return uniquePrefix + ext;
+            }
+
+            let serverFileName = generateServerFileName(file);
+
+            const saved = savedFiles.find(savedFile => savedFile.name === file.name
+                && savedFile.size === file.size && !savedFile.completed);
+
+            // 이미 존재하는 파일인지 확인
+            const existingItem = convertedFiles.find(item =>
+                item.name === file.name && item.size === file.size && !item.completed
+            );
+
+            if (existingItem) {
+                // 기존 항목에 file 객체만 업데이트
+                existingItem.file = file;
+                existingItem.recTime = recTime;
+                createUploadObject(existingItem);
+                reRenderAllFiles();
+                continue;
+            }
+
+            if (saved) {
+                progress = saved.progress || 0;
+                completed = saved.completed || false;
+                uniqueId = saved.id;
+                serverFileName = saved.serverFileName;
+            }
+
+            const item = {
+                id: uniqueId,
+                file: file,
+                name: file.name,
+                type: file.type,
+                size: file.size,
+                recTime: recTime,
+                completed: completed,
+                progress: progress,
+                serverFileName: serverFileName
+            };
+
+            convertedFiles.push(item);
+            createUploadObject(item);
+        }
+
+        // UI 전체 다시 렌더링
+        reRenderAllFiles();
+
+        // 저장
+        saveToStorage();
+        fileInput.value = '';
+    });
+
+    // 업로드 객체 생성 함수
+    function createUploadObject(item) {
+        const file = item.file;
+        if (!file) return; // file 객체가 없으면 생성하지 않음
+
+        const displayKey = item.id;
+        const chunkSize = parseInt(50000000, 10); // 50MB
+
+        let upload = new tus.Upload(file, {
+            endpoint: "/api/tus/file/upload",
+            chunkSize,
+            retryDelays: [0, 1000, 3000, 5000],
+            // 업로드 재개를 위한 fingerprint
+            fingerprint: function(file, options) {
+                return Promise.resolve([
+                    'tus',
+                    file.name,
+                    file.type,
+                    file.size,
+                    file.lastModified,
+                    item.id
+                ].join('-'));
+            },
+            headers: {
+                'X-Tenant-Id': document.getElementById('r_tenant_id').value,
+                'X-Rec-Date': getToday(),
+                'X-Rec-Htime': getCurrentHour(),
+                'X-Rec-Time': item.recTime,
+                'X-Ext-No': document.getElementById('r_ext_no').value,
+                'X-File-Name': file.name,
+                'X-Client-File-Name': file.name,
+                'X-Server-File-Name': item.serverFileName
+            },
+            metadata: {
+                filename: file.name,
+                filetype: file.type,
+                serverFileName: item.serverFileName
+            },
+            onError: function (error) {
+                console.log("Failed because: " + error);
+                $('#js-upload-text-progress_' + displayKey).html(`<span class="text-danger">업로드 실패</span>`);
+            },
+            onProgress: function (bytesUploaded, bytesTotal) {
+                const percentage = ((bytesUploaded / bytesTotal) * 100).toFixed(2);
+                $('.progress-bar_' + displayKey).css('width', percentage + '%');
+
+                // 진행률 저장
+                item.progress = percentage;
+                saveToStorage();
+
+                if (percentage < 100.00) {
+                    $('#js-upload-text-progress_' + displayKey).html(
+                        `Uploaded ${formatBytes(bytesUploaded)} of ${formatBytes(bytesTotal)} (${percentage}%)`
+                    );
+                } else {
+                    $('#js-upload-text-progress_' + displayKey).html(
+                        `Uploaded ${formatBytes(bytesUploaded)} of ${formatBytes(bytesTotal)} (${percentage}%) 파일 저장 중`
+                    );
+                }
+            },
+            onSuccess: function () {
+                $('#js-upload-text-progress_' + displayKey).html("파일 저장 완료");
+                $('[data-id="' + item.id + '"]').addClass('completed');
+
+                // 완료 상태 저장
+                item.completed = true;
+                item.progress = 100;
+                saveToStorage();
+                reRenderAllFiles(); // 상태 업데이트 후 UI 갱신
+            }
+        });
+
+        // upload 객체를 item에 저장
+        item.upload = upload;
+    }
+
+    // 파일 삭제 함수 (ID 기반)
+    window.removeFileById = function(fileId) {
+        const itemIndex = convertedFiles.findIndex(item => item.id === fileId);
+        if (itemIndex > -1) {
+            if (convertedFiles[itemIndex].file) {
+                URL.revokeObjectURL(convertedFiles[itemIndex].id);
+            }
+            convertedFiles.splice(itemIndex, 1);
+        }
+
+        // UI 전체 다시 렌더링 (순서 업데이트)
+        reRenderAllFiles();
+        saveToStorage();
+    };
+
+    toggleBtn.addEventListener('click', async (e) => {
+        const tenantId = document.getElementById('r_tenant_id').value;
+        const extNo = document.getElementById('r_ext_no').value;
+
+        if (!tenantId || !extNo) {
+            alert('Tenant ID와 내선 번호를 입력해주세요.');
+            return;
+        }
+
+        if (convertedFiles.length === 0) {
+            alert('파일을 먼저 선택해주세요.');
+            return;
+        }
+
+        // 폼 데이터 저장
+        saveFormData();
+
+        for (const item of convertedFiles) {
+            // 이미 완료된 파일은 스킵
+            if (item.completed) {
+                continue;
+            }
+
+            // file 객체가 없으면 스킵 (새로고침 후)
+            if (!item.file) {
+                console.warn('파일을 다시 선택해야 합니다:', item.name);
+                continue;
+            }
+
+            // upload 객체가 없으면 스킵
+            if (!item.upload) {
+                console.warn('업로드 객체가 없습니다:', item.name);
+                continue;
+            }
+
+            const upload = item.upload;
+
+            try {
+                // 이전 업로드 찾기
+                const previousUploads = await upload.findPreviousUploads();
+
+                // 이전 업로드가 있으면 재개
+                if (previousUploads.length) {
+                    console.log('Resuming upload:', item.name);
+                    upload.resumeFromPreviousUpload(previousUploads[0]);
+                }
+
+                // 업로드 시작
+                upload.start();
+            } catch (error) {
+                console.error('Upload error:', error);
+            }
+        }
+    });
+
+    clearBtn.addEventListener('click', () => {
+        if (confirm('모든 업로드 기록을 삭제하시겠습니까?')) {
+            // URL 해제
+            convertedFiles.forEach(item => {
+                if (item.id) URL.revokeObjectURL(item.id);
+            });
+
+            // 초기화
+            convertedFiles = [];
+            dataDiv.innerHTML = '';
+            localStorage.removeItem(STORAGE_KEY);
+        }
+    });
+
+    // 페이지 로드 시 저장된 파일 목록 복원
+    window.addEventListener('DOMContentLoaded', () => {
+        loadFormData();
+        restoreSavedFiles();
+    });
+</script>
+</body>
+</html>
