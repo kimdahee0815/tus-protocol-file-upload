@@ -1,0 +1,337 @@
+openapi: "3.0.2"
+info:
+  title: DB-SYNCER API INTERFACE
+  version: "1.0"
+  description: DB-SYNCER 서비스 API 정의서 입니다.
+servers:
+  - url: http://localhost:7962
+
+tags:
+  - name: query
+    description: 쿼리 동기화
+  - name: redis
+    description: 레디스 동기화
+
+paths:
+  /query/sync:
+    post:
+      tags: 
+        - query
+      description: 쿼리 동기화
+      summary: 쿼리 동기화
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                query:
+                  description: 실행할 쿼리 리스트
+                  type: array
+                  items: 
+                    type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                properties:
+                  status:
+                    type: integer
+                    example: 1
+                    description: 상태 코드
+                  message:
+                    type: string
+                    example: "success"
+                    description: 메시지
+                  payload:
+                    type: object
+
+  /redis/sync/set:
+    post:
+      tags: 
+        - redis
+      description: 레디스 저장 동기화
+      summary: 레디스 저장 동기화
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                data:
+                  description: 실행할 쿼리 리스트
+                  type: array
+                  items: 
+                    type: object
+                    properties:
+                        key:
+                          type: string
+                          nullable: false
+                          description: 저장할 레디스 key 데이터
+                        value:
+                          type: string
+                          nullable: false
+                          description: key에 저장할 value 데이터
+                        timeout:
+                          type: integer
+                          nullable: true
+                          description: ttl 데이터
+                    
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                properties:
+                  status:
+                    type: integer
+                    example: 1
+                    description: 상태 코드
+                  message:
+                    type: string
+                    example: "success"
+                    description: 메시지
+                  payload:
+                    type: object
+  /redis/sync/del:
+    post:
+      tags: 
+        - redis
+      description: 레디스 삭제 동기화
+      summary: 레디스 삭제 동기화
+      requestBody:
+        content:
+          application/json:
+            schema:
+              properties:
+                data:
+                  description: 실행할 쿼리 리스트
+                  type: array
+                  items: 
+                    type: object
+                    properties:
+                        key:
+                          type: string
+                          nullable: false
+                          description: 저장할 레디스 key 데이터
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                properties:
+                  status:
+                    type: integer
+                    example: 1
+                    description: 상태 코드
+                  message:
+                    type: string
+                    example: "success"
+                    description: 메시지
+                  payload:
+                    type: object
+  ##########################################################################
+  # 파일 업로드 (tus 기반)
+  ##########################################################################
+  /api/tus/file/upload:
+    post:
+      tags:
+        - file
+      summary: tus 파일 업로드 초기화
+      description: tus 프로토콜 기반 파일 업로드
+      parameters:
+        - in: header
+          name: Upload-Length
+          required: true
+          schema:
+            type: integer
+          description: 업로드할 전체 파일 크기 (바이트)
+        - in: header
+          name: Upload-Metadata
+          required: true
+          schema:
+            type: string
+          description: 파일 이름, 타입 등의 메타데이터 (Base64 인코딩)
+      responses:
+        "201":
+          description: 업로드 세션 생성됨
+          headers:
+            Location:
+              description: 업로드를 진행할 고유 URL (PATCH 요청용)
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/400"
+
+  /api/tus/file/upload/{uploadId}:
+    patch:
+      tags:
+        - file
+      summary: tus 파일 업로드 조각 업로드
+      description: 업로드 세션 중간에 파일 조각을 PATCH로 전송
+      parameters:
+        - in: path
+          name: uploadId
+          required: true
+          schema:
+            type: string
+          description: 업로드 세션 ID
+        - in: header
+          name: Upload-Offset
+          required: true
+          schema:
+            type: integer
+          description: 현재 업로드 오프셋 (바이트)
+        - in: header
+          name: Content-Type
+          required: true
+          schema:
+            type: string
+            example: application/offset+octet-stream
+        - in: header
+          name: Content-Length
+          required: true
+          schema:
+            type: integer
+          description: 현재 전송 chunk 크기 (바이트)
+      requestBody:
+        required: true
+        content:
+          application/offset+octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "204":
+          description: 조각 업로드 성공
+        "409":
+          description: Offset 불일치 에러
+        "413":
+          description: 전송 용량 초과
+        "500":
+          description: 서버 오류
+
+    head:
+      tags:
+        - file
+      summary: tus 업로드 상태 조회
+      description: 현재 업로드된 바이트 수(`Upload-Offset`)를 확인
+      parameters:
+        - in: path
+          name: uploadId
+          required: true
+          schema:
+            type: string
+          description: 업로드 세션 ID
+      responses:
+        "200":
+          description: 업로드 상태 반환
+          headers:
+            Upload-Offset:
+              description: 현재까지 업로드된 바이트
+              schema:
+                type: integer
+            Upload-Length:
+              description: 전체 파일 크기
+              schema:
+                type: integer
+        "404":
+          description: 업로드 세션 없음
+
+    options:
+      tags:
+        - file
+      summary: tus 프로토콜 옵션 조회
+      description: 지원되는 tus 메서드, 헤더 등을 반환
+      responses:
+        "204":
+          description: 허용된 tus 메서드 반환
+          headers:
+            Tus-Resumable:
+              schema:
+                type: string
+                example: "1.0.0"
+            Tus-Version:
+              schema:
+                type: string
+                example: "1.0.0"
+            Tus-Extension:
+              schema:
+                type: string
+                example: "creation,termination"
+
+  
+######################################################################################
+######################################################################################
+components:
+  responses:
+    "400":
+      description: 파라미터 오류
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponseBody"
+    "401":
+      description: 미인증사용자 혹은 인증실패
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponseBody"
+
+    "404":
+      description: 미인증사용자 혹은 인증실패
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponseBody"
+
+    "405":
+      description: HTTP 메서드 호출 오류 (호출 HTTP 메서드 확인)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponseBody"
+
+    "500":
+      description: 서버측 에러
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponseBody"
+
+    default:
+      description: 기타  에러
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponseBody"
+
+  headers:
+    x-request-id:
+      description: session identifier
+      schema:
+        type: string
+    x-payload-sign:
+      description: message digest
+      schema:
+        type: string
+
+  schemas:
+    ############################
+    # Http Error 반환
+    ############################
+    ErrorResponseBody:
+      type: object
+      properties:
+        status:
+          type: integer
+          description: 상태코드
+        message:
+          type: string
+          description: 메세지
+        payload:
+          type: object
+          example: null
+          nullable: true
